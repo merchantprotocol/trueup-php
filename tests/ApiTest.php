@@ -13,7 +13,7 @@ use TrueUp\TrueUp;
 
 /**
  * Integration tests against the live TrueUp API. Need TRUEUP_API_KEY (and optionally TRUEUP_BASE_URL).
- * Each full run uses 4 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
+ * Each full run uses 6 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
  */
 final class ApiTest extends TestCase
 {
@@ -144,5 +144,21 @@ final class ApiTest extends TestCase
         }
         $this->expectException(NotFoundException::class);
         $tu->getFile($statement['id']);
+    }
+
+    public function testMatchTwoListsThenReuseTheLearning(): void
+    {
+        $this->live();
+        $tu = new TrueUp();
+        $matched = [['1', '1'], ['2', '2'], ['3', '3'], ['4', '5']];
+        $result = $tu->match(self::fixture('invoice.csv'), self::fixture('catalog.csv'));
+        $this->assertSame('match', $result['analysis']);
+        $this->assertSame($matched, array_map(fn ($p) => array_slice($p, 0, 2), $result['details']['pairs']));
+        $only = array_values(array_filter($result['findings'], fn ($f) => $f['kind'] === 'only_left'));
+        $this->assertSame(['5'], array_column($only, 'subject'));
+        $again = $tu->match(Table::rows('invoice.csv', self::rows('invoice.csv')), Table::rows('catalog.csv', self::rows('catalog.csv')),
+            weights: $result['details']['weights']);
+        $this->assertSame($matched, array_map(fn ($p) => array_slice($p, 0, 2), $again['details']['pairs']));
+        $this->assertFalse($again['details']['model']['learned']);
     }
 }
