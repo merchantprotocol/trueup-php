@@ -190,6 +190,37 @@ final class TrueUp
         return $this->stored('/v1/audit', null, null, $fileIds, $model, null);
     }
 
+    // ---------------------------------------------------------------- estimate
+
+    /**
+     * Price a new job from past estimates: a domain file for the trade (.tu), at least 3 past estimates in any
+     * format, and one request describing the new job; or, with $weights (details['weights'] of an earlier estimate),
+     * just the request. One analysis.
+     *
+     * @param list<string|Table> $files
+     */
+    public function estimate(array $files, ?array $weights = null): array
+    {
+        if (!$files) {
+            throw new InvalidRequestException('Pass the domain file, past estimates and the request.', 0, 'invalid_request', null);
+        }
+        $parts = [];
+        foreach ($files as $f) {
+            $parts[] = ['files', ...($f instanceof Table ? $f : Table::file($f))->asFile()];
+        }
+        return $this->request('POST', '/v1/estimate', parts: $parts, fields: self::options($weights, null));
+    }
+
+    /**
+     * Price from files already stored in the team, by id. $model applies a saved estimate model.
+     *
+     * @param list<string> $fileIds
+     */
+    public function estimateStored(array $fileIds, ?string $model = null): array
+    {
+        return $this->stored('/v1/estimate', null, null, $fileIds, $model, null);
+    }
+
     // ---------------------------------------------------------------- stored files, runs, saved models
 
     /**
