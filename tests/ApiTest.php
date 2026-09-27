@@ -13,7 +13,7 @@ use TrueUp\TrueUp;
 
 /**
  * Integration tests against the live TrueUp API. Need TRUEUP_API_KEY (and optionally TRUEUP_BASE_URL).
- * Each full run uses 6 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
+ * Each full run uses 8 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
  */
 final class ApiTest extends TestCase
 {
@@ -160,5 +160,19 @@ final class ApiTest extends TestCase
             weights: $result['details']['weights']);
         $this->assertSame($matched, array_map(fn ($p) => array_slice($p, 0, 2), $again['details']['pairs']));
         $this->assertFalse($again['details']['model']['learned']);
+    }
+
+    public function testAuditSixInvoicesThenOneAgainstTheSavedLaws(): void
+    {
+        $this->live();
+        $tu = new TrueUp();
+        $files = array_map(fn ($i) => self::fixture("invoices/inv-104{$i}.txt"), range(1, 6));
+        $result = $tu->audit($files);
+        $this->assertSame('audit', $result['analysis']);
+        $this->assertSame([['inv-1045.txt', 'yes', 200]], array_map(fn ($f) => [$f['subject'], $f['status'], $f['amount']], $result['findings']));
+        $this->assertContains('subtotal + tax amount = total', array_column($result['details']['laws'], 'law'));
+        $one = $tu->audit([self::fixture('invoices/inv-1045.txt')], $result['details']['weights']);
+        $this->assertFalse($one['details']['model']['learned']);
+        $this->assertSame(['inv-1045.txt'], array_column($one['findings'], 'subject'));
     }
 }
