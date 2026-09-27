@@ -111,6 +111,128 @@ final class TrueUp
         return $this->request('POST', '/v1/reconcile', parts: $parts, fields: self::options($weights, $answers));
     }
 
+    // ---------------------------------------------------------------- stored files, runs, saved models
+
+    /**
+     * Upload one or more files (paths or Tables) to the team. Each comes back with its id, rows, columns and roles
+     * (what TrueUp read each column as).
+     *
+     * @return list<array>
+     */
+    public function uploadFiles(string|Table ...$files): array
+    {
+        if (!$files) {
+            throw new InvalidRequestException('Pass at least one file to upload.', 0, 'invalid_request');
+        }
+        $parts = [];
+        foreach ($files as $f) {
+            $parts[] = ['file', ...($f instanceof Table ? $f : Table::file($f))->asFile()];
+        }
+        return $this->request('POST', '/v1/files', parts: $parts)['files'];
+    }
+
+    /** @return list<array> The team's stored files. */
+    public function listFiles(): array
+    {
+        return $this->request('GET', '/v1/files')['files'];
+    }
+
+    public function getFile(string $id): array
+    {
+        return $this->request('GET', '/v1/files/' . rawurlencode($id))['file'];
+    }
+
+    /** The file's bytes, exactly as uploaded. */
+    public function fileContent(string $id): string
+    {
+        return $this->request('GET', '/v1/files/' . rawurlencode($id) . '/content', binary: true);
+    }
+
+    public function deleteFile(string $id): void
+    {
+        $this->request('DELETE', '/v1/files/' . rawurlencode($id));
+    }
+
+    /**
+     * Reconcile files already stored in the team, by id: two ids (left bills or claims), or pass $fileIds for TrueUp
+     * to pick the pair. $model applies a saved model instead of learning. The run is kept: its id is 'run_id' in the
+     * result. One analysis.
+     *
+     * @param list<string>|null $fileIds
+     */
+    public function reconcileStored(
+        ?string $leftFileId = null,
+        ?string $rightFileId = null,
+        ?array $fileIds = null,
+        ?string $model = null,
+        ?array $answers = null,
+    ): array {
+        if ($fileIds !== null) {
+            $body = ['file_ids' => array_values($fileIds)];
+        } elseif ($leftFileId !== null && $rightFileId !== null) {
+            $body = ['left_file_id' => $leftFileId, 'right_file_id' => $rightFileId];
+        } else {
+            throw new InvalidRequestException('Pass leftFileId and rightFileId, or fileIds.', 0, 'invalid_request');
+        }
+        if ($model !== null) {
+            $body['model'] = $model;
+        }
+        if ($answers !== null) {
+            $body['answers'] = $answers;
+        }
+        return $this->request('POST', '/v1/reconcile', json: $body);
+    }
+
+    /**
+     * One page of runs on stored files, newest first: ['runs' => [...], 'has_more' => bool].
+     * $limit is 1-100; $before is a run id.
+     */
+    public function listRuns(?int $limit = null, ?string $before = null): array
+    {
+        $query = http_build_query(array_filter(['limit' => $limit, 'before' => $before], fn ($v) => $v !== null));
+        return $this->request('GET', '/v1/runs' . ($query !== '' ? "?{$query}" : ''));
+    }
+
+    /** Every run, fetching page after page. */
+    public function allRuns(): \Generator
+    {
+        $before = null;
+        do {
+            $page = $this->listRuns(100, $before);
+            yield from $page['runs'];
+            $before = $page['runs'] ? $page['runs'][count($page['runs']) - 1]['id'] : null;
+        } while ($page['has_more'] && $before !== null);
+    }
+
+    /** ['run' => [...], 'result' => [...]]: the result has the same shape reconcile() returns. */
+    public function getRun(string $id): array
+    {
+        return $this->request('GET', '/v1/runs/' . rawurlencode($id));
+    }
+
+    /** Save what a run learned as a model. Returns the model id. */
+    public function createModel(string $runId, ?string $name = null): string
+    {
+        return $this->request('POST', '/v1/models', json: array_filter(['run_id' => $runId, 'name' => $name], fn ($v) => $v !== null))['id'];
+    }
+
+    /** @return list<array> */
+    public function listModels(): array
+    {
+        return $this->request('GET', '/v1/models')['models'];
+    }
+
+    /** One saved model, including its 'weights'. */
+    public function getModel(string $id): array
+    {
+        return $this->request('GET', '/v1/models/' . rawurlencode($id))['model'];
+    }
+
+    public function deleteModel(string $id): void
+    {
+        $this->request('DELETE', '/v1/models/' . rawurlencode($id));
+    }
+
     // ---------------------------------------------------------------- transport
 
     private static function options(?array $weights, ?array $answers): array
@@ -129,7 +251,7 @@ final class TrueUp
      * @param list<array{0: string, 1: string, 2: string}> $parts  [field, file name, bytes]
      * @param array<string, string>                          $fields
      */
-    private function request(string $method, string $path, ?array $json = null, array $parts = [], array $fields = []): array
+    private function request(string $method, string $path, ?array $json = null, array $parts = [], array $fields = [], bool $binary = false): array|string
     {
         $headers = [
             'Authorization: Bearer ' . $this->apiKey,
@@ -175,6 +297,9 @@ final class TrueUp
                     continue;
                 }
                 throw new ConnectionException("Couldn't reach TrueUp at {$this->baseUrl}: {$curlError}");
+            }
+            if ($binary && $status >= 200 && $status < 300) {
+                return (string) $raw;
             }
             $data = json_decode((string) $raw, true);
             if ($status >= 200 && $status < 300) {
