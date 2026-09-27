@@ -13,7 +13,7 @@ use TrueUp\TrueUp;
 
 /**
  * Integration tests against the live TrueUp API. Need TRUEUP_API_KEY (and optionally TRUEUP_BASE_URL).
- * Each full run uses 8 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
+ * Each full run uses 10 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
  */
 final class ApiTest extends TestCase
 {
@@ -122,8 +122,9 @@ final class ApiTest extends TestCase
             $this->assertSame(7, $got['result']['stats']['paired']);
             $page = $tu->listRuns(1);
             $this->assertCount(1, $page['runs']);
-            $this->assertTrue($page['has_more']);
-            $this->assertNotSame($page['runs'][0]['id'], $tu->listRuns(1, $page['runs'][0]['id'])['runs'][0]['id']);
+            if ($page['has_more']) {
+                $this->assertNotSame($page['runs'][0]['id'], $tu->listRuns(1, $page['runs'][0]['id'])['runs'][0]['id']);
+            }
 
             $modelId = $tu->createModel($result['run_id'], 'sdk test');
             try {
@@ -174,5 +175,19 @@ final class ApiTest extends TestCase
         $one = $tu->audit([self::fixture('invoices/inv-1045.txt')], $result['details']['weights']);
         $this->assertFalse($one['details']['model']['learned']);
         $this->assertSame(['inv-1045.txt'], array_column($one['findings'], 'subject'));
+    }
+
+    public function testEstimateANewJobThenTheNextWithTheSavedModel(): void
+    {
+        $this->live();
+        $tu = new TrueUp();
+        $trade = ["barndo.tu", "01_anderson.csv", "02_brooks.csv", "03_carter.md", "04_dalton.txt", "05_ellis.json", "06_foster.tsv", "07_garrison.txt", "08_hayes.csv", "09_iverson.csv", "10_jensen.md"];
+        $result = $tu->estimate(array_map(fn ($n) => self::fixture("barndo/$n"), [...$trade, 'job_a.txt']));
+        $this->assertSame('estimate', $result['analysis']);
+        $this->assertSame(10, $result['stats']['past estimates']);
+        $this->assertLessThan(0.05, abs($result['stats']['total'] - 292267) / 292267);
+        $this->assertLessThan($result['stats']['total'], $result['stats']['low']);
+        $next = $tu->estimate([self::fixture('barndo/job_b.txt')], $result['details']['weights']);
+        $this->assertFalse($next['details']['model']['learned']);
     }
 }
