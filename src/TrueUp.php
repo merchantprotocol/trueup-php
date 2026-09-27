@@ -159,6 +159,37 @@ final class TrueUp
         return $this->stored('/v1/match', $leftFileId, $rightFileId, $fileIds, $model, null);
     }
 
+    // ---------------------------------------------------------------- audit
+
+    /**
+     * Find what doesn't add up. Text documents (invoices, statements, 4 or more of a kind): TrueUp learns the
+     * arithmetic each kind obeys and flags the ones that break it. One table: the same for its rows, plus repeated
+     * rows. $weights (details['weights'] of an earlier audit) checks new documents against the same laws. One analysis.
+     *
+     * @param list<string|Table> $files
+     */
+    public function audit(array $files, ?array $weights = null): array
+    {
+        if (!$files) {
+            throw new InvalidRequestException('Pass the documents (or one table) to audit.', 0, 'invalid_request', null);
+        }
+        $parts = [];
+        foreach ($files as $f) {
+            $parts[] = ['files', ...($f instanceof Table ? $f : Table::file($f))->asFile()];
+        }
+        return $this->request('POST', '/v1/audit', parts: $parts, fields: self::options($weights, null));
+    }
+
+    /**
+     * Audit files already stored in the team, by id. $model applies a saved audit model. The run is kept ('run_id').
+     *
+     * @param list<string> $fileIds
+     */
+    public function auditStored(array $fileIds, ?string $model = null): array
+    {
+        return $this->stored('/v1/audit', null, null, $fileIds, $model, null);
+    }
+
     // ---------------------------------------------------------------- stored files, runs, saved models
 
     /**
