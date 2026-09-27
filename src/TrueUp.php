@@ -111,6 +111,54 @@ final class TrueUp
         return $this->request('POST', '/v1/reconcile', parts: $parts, fields: self::options($weights, $answers));
     }
 
+    // ---------------------------------------------------------------- match
+
+    /**
+     * Match two lists that describe the same things in different words (two catalogs, a price book and an invoice):
+     * each record on $left (the list to go through) is paired with its counterpart on $right (the list to search), or
+     * reported as having none. A path or a Table. One analysis.
+     *
+     * @param array|null $weights details['weights'] from an earlier match, to apply instead of learning again
+     */
+    public function match(string|Table $left, string|Table $right, ?array $weights = null): array
+    {
+        $l = $left instanceof Table ? $left : Table::file($left);
+        $r = $right instanceof Table ? $right : Table::file($right);
+        if ($l->isRows() && $r->isRows()) {
+            $body = ['left' => ['name' => $l->name, 'rows' => $l->getRows()], 'right' => ['name' => $r->name, 'rows' => $r->getRows()]];
+            if ($weights !== null) {
+                $body['weights'] = $weights;
+            }
+            return $this->request('POST', '/v1/match', json: $body);
+        }
+        $parts = [['left', ...$l->asFile()], ['right', ...$r->asFile()]];
+        return $this->request('POST', '/v1/match', parts: $parts, fields: self::options($weights, null));
+    }
+
+    /**
+     * Send two or more lists; TrueUp picks the pair to match and puts the shorter on the left. One analysis.
+     *
+     * @param list<string|Table> $files
+     */
+    public function matchFiles(array $files, ?array $weights = null): array
+    {
+        $parts = [];
+        foreach ($files as $f) {
+            $parts[] = ['files', ...($f instanceof Table ? $f : Table::file($f))->asFile()];
+        }
+        return $this->request('POST', '/v1/match', parts: $parts, fields: self::options($weights, null));
+    }
+
+    /**
+     * Match lists already stored in the team, by id. $model applies a saved match model. The run is kept ('run_id').
+     *
+     * @param list<string>|null $fileIds
+     */
+    public function matchStored(?string $leftFileId = null, ?string $rightFileId = null, ?array $fileIds = null, ?string $model = null): array
+    {
+        return $this->stored('/v1/match', $leftFileId, $rightFileId, $fileIds, $model, null);
+    }
+
     // ---------------------------------------------------------------- stored files, runs, saved models
 
     /**
@@ -167,6 +215,11 @@ final class TrueUp
         ?string $model = null,
         ?array $answers = null,
     ): array {
+        return $this->stored('/v1/reconcile', $leftFileId, $rightFileId, $fileIds, $model, $answers);
+    }
+
+    private function stored(string $path, ?string $leftFileId, ?string $rightFileId, ?array $fileIds, ?string $model, ?array $answers): array
+    {
         if ($fileIds !== null) {
             $body = ['file_ids' => array_values($fileIds)];
         } elseif ($leftFileId !== null && $rightFileId !== null) {
@@ -180,7 +233,7 @@ final class TrueUp
         if ($answers !== null) {
             $body['answers'] = $answers;
         }
-        return $this->request('POST', '/v1/reconcile', json: $body);
+        return $this->request('POST', $path, json: $body);
     }
 
     /**
