@@ -67,6 +67,33 @@ $trueup->reconcile('statement.csv', 'receiving.csv', answers: [
 
 Each call to `reconcile` or `reconcileFiles` counts as one analysis on your plan.
 
+## Stored files, runs and saved models
+
+Files uploaded to your team stay there (you'll also see them in the dashboard). Runs on stored files are kept, and what a run learned can be saved as a model:
+
+```php
+[$statement, $receiving] = $trueup->uploadFiles('statement.csv', 'receiving.csv');
+$statement['rows'];    // 8
+$statement['roles'];   // ['Inv Date' => 'date', 'Qty' => 'number', ...]
+
+$result = $trueup->reconcileStored($statement['id'], $receiving['id']);
+$modelId = $trueup->createModel($result['run_id'], 'Acme statements');
+
+// Next month: apply what was learned.
+$trueup->reconcileStored(fileIds: [$aprilStatement['id'], $aprilReceiving['id']], model: $modelId);
+```
+
+| Method | Returns |
+|---|---|
+| `uploadFiles(...$files)`, `listFiles()`, `getFile($id)` | stored files: `id`, `name`, `rows`, `columns`, `roles` |
+| `fileContent($id)` | the bytes, exactly as uploaded |
+| `deleteFile($id)` | |
+| `reconcileStored($leftId, $rightId)` or `reconcileStored(fileIds: [...])`, with `model:`, `answers:` | a result plus `run_id` (one analysis) |
+| `listRuns($limit, $before)` | `['runs' => [...], 'has_more' => bool]`, newest first |
+| `allRuns()` | every run (a generator that pages for you) |
+| `getRun($id)` | `['run' => ..., 'result' => ...]` |
+| `createModel($runId, $name)`, `listModels()`, `getModel($id)`, `deleteModel($id)` | `getModel` includes the `weights` |
+
 ## Findings
 
 | `kind` | Meaning |
@@ -114,7 +141,7 @@ new TrueUp(
 The tests run in Docker against the live API:
 
 ```bash
-export TRUEUP_API_KEY=tu_live_...   # a key for a test team (each run uses 2 analyses)
+export TRUEUP_API_KEY=tu_live_...   # a key for a test team (each run uses 4 analyses)
 just test                            # or: docker compose run --rm test
 ```
 

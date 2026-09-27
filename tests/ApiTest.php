@@ -7,12 +7,13 @@ namespace TrueUp\Tests;
 use PHPUnit\Framework\TestCase;
 use TrueUp\Exception\AuthenticationException;
 use TrueUp\Exception\InvalidRequestException;
+use TrueUp\Exception\NotFoundException;
 use TrueUp\Table;
 use TrueUp\TrueUp;
 
 /**
  * Integration tests against the live TrueUp API. Need TRUEUP_API_KEY (and optionally TRUEUP_BASE_URL).
- * Each full run uses 2 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
+ * Each full run uses 4 analyses. Run in Docker: `just test` (or `docker compose run --rm test`).
  */
 final class ApiTest extends TestCase
 {
@@ -101,5 +102,47 @@ final class ApiTest extends TestCase
             $this->assertSame(422, $e->getStatus());
             $this->assertSame('unsupported_file', $e->getErrorCode());
         }
+    }
+
+    public function testStoredFilesRunsAndModels(): void
+    {
+        $this->live();
+        $tu = new TrueUp();
+        [$statement, $receiving] = $tu->uploadFiles(self::fixture('statement.csv'), self::fixture('receiving.csv'));
+        try {
+            $this->assertSame(8, $statement['rows']);
+            $this->assertSame('receiving.csv', $tu->getFile($receiving['id'])['name']);
+            $this->assertContains($statement['id'], array_column($tu->listFiles(), 'id'));
+            $this->assertSame(file_get_contents(self::fixture('statement.csv')), $tu->fileContent($statement['id']));
+
+            $result = $tu->reconcileStored($statement['id'], $receiving['id']);
+            $this->assertSame(7, $result['stats']['paired']);
+            $got = $tu->getRun($result['run_id']);
+            $this->assertSame('done', $got['run']['status']);
+            $this->assertSame(7, $got['result']['stats']['paired']);
+            $page = $tu->listRuns(1);
+            $this->assertCount(1, $page['runs']);
+            $this->assertTrue($page['has_more']);
+            $this->assertNotSame($page['runs'][0]['id'], $tu->listRuns(1, $page['runs'][0]['id'])['runs'][0]['id']);
+
+            $modelId = $tu->createModel($result['run_id'], 'sdk test');
+            try {
+                $this->assertSame('trueup.match-weights', $tu->getModel($modelId)['weights']['format']);
+                $again = $tu->reconcileStored(fileIds: [$statement['id'], $receiving['id']], model: $modelId);
+                $this->assertFalse($again['details']['model']['learned']);
+            } finally {
+                $tu->deleteModel($modelId);
+            }
+            try {
+                $tu->getModel($modelId);
+                $this->fail('a deleted model is gone');
+            } catch (NotFoundException) {
+            }
+        } finally {
+            $tu->deleteFile($statement['id']);
+            $tu->deleteFile($receiving['id']);
+        }
+        $this->expectException(NotFoundException::class);
+        $tu->getFile($statement['id']);
     }
 }
